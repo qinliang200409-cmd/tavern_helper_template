@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "系统": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "当前时间": {
+          "default": "黄昏",
+          "type": "string",
+          "enum": [
+            "早",
+            "午",
+            "黄昏",
+            "夜",
+            "深夜"
+          ]
+        },
+        "当前场景": {
+          "default": "客厅",
+          "type": "string",
+          "enum": [
+            "客厅",
+            "玄关",
+            "厨房",
+            "浴室",
+            "阳台",
+            "千夏的房间",
+            "{{user}}的房间",
+            "庭院",
+            "室外",
+            "祭典"
+          ]
+        },
+        "当前日期": {
+          "default": 1,
+          "type": "number"
+        }
+      }
+    },
+    "千夏": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "亲密阶段": {
+          "default": "日常",
+          "type": "string",
+          "enum": [
+            "日常",
+            "暧昧",
+            "沉沦",
+            "矛盾"
+          ]
+        },
+        "亲密度": {
+          "default": 10,
+          "type": "number"
+        },
+        "性经验值": {
+          "default": 0,
+          "type": "number"
+        },
+        "性唤起度": {
+          "default": 0,
+          "type": "number"
+        },
+        "穿着状态": {
+          "default": "居家服",
+          "type": "string",
+          "enum": [
+            "校服",
+            "居家服",
+            "你的T恤",
+            "浴衣",
+            "裸体",
+            "真空",
+            "校服裙"
+          ]
+        },
+        "负罪感": {
+          "default": 0,
+          "type": "number"
+        },
+        "占有欲": {
+          "default": 5,
+          "type": "number"
+        }
+      }
+    },
+    "玩家": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "欲望值": {
+          "default": 0,
+          "type": "number"
+        },
+        "勃起状态": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
