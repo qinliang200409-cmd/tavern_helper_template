@@ -45,17 +45,43 @@ function render(d: any): string {
 }
 
 /**
- * 从 chat 级别变量读取 stat_data（MVU 框架的实时数据默认存储在此）
+ * 从最新的消息楼层变量读取 stat_data（MVU 框架将变量存储在 message 级别）
+ * 遍历聊天消息，找到最后一个包含 stat_data 的消息楼层
  */
-function getStatData(): Record<string, any> {
-  return _.get(getVariables({ type: 'chat' }), 'stat_data', {});
+function getStatDataFromLatestMessage(): Record<string, any> {
+  try {
+    const messages = getChatMessages();
+    // 从最新消息往前找，找到包含 stat_data 的
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg?.data) {
+        try {
+          const mvuData = Mvu.getMvuData({ type: 'message', message_id: msg.message_id ?? i });
+          if (mvuData?.stat_data && Object.keys(mvuData.stat_data).length > 0) {
+            return mvuData.stat_data;
+          }
+        } catch {
+          // 单条消息获取失败，继续尝试
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[状态栏] 遍历消息获取 stat_data 失败', e);
+  }
+  return {};
 }
 
+/**
+ * 直接使用 MVU 事件传递的最新变量来渲染
+ */
+let latestStatData: Record<string, any> = {};
+
 function renderBar($el: JQuery) {
-  const stat = getStatData();
+  const stat = latestStatData;
   if (stat && Object.keys(stat).length > 0) {
     $el.html(render(stat));
   } else {
+    $el.html('<div class="st-bar" style="text-align:center;color:#A89680;padding:6px">⏳ 等待变量初始化…</div>');
     console.info('[状态栏] stat_data 为空，等待 MVU 数据初始化');
   }
 }
@@ -80,28 +106,35 @@ $(() => {
   // 创建容器
   const $el = createScriptIdDiv().appendTo('#chat');
 
-  // 首次渲染（从 chat 级别变量读取）
+  // 首次尝试从最新消息楼层获取变量
+  latestStatData = getStatDataFromLatestMessage();
   renderBar($el);
 
-  // 等待 MVU 框架初始化，然后监听变量更新
+  // 等待 MVU 框架初始化
   let offMvuEvent: (() => void) | undefined;
 
   waitGlobalInitialized<typeof Mvu>('Mvu')
     .then(mvu => {
       console.info('[状态栏] MVU 已就绪');
 
-      // 用 Mvu API 重新获取一次数据（更可靠）
-      try {
-        const mvuData = mvu.getMvuData({ type: 'chat' });
-        if (mvuData?.stat_data && Object.keys(mvuData.stat_data).length > 0) {
-          $el.html(render(mvuData.stat_data));
-        }
-      } catch (e) {
-        console.warn('[状态栏] Mvu.getMvuData 失败，回退至 getVariables', e);
-      }
+      // 再次尝试从最新消息楼层获取
+      latestStatData = getStatDataFromLatestMessage();
+      renderBar($el);
 
-      // 监听 MVU 变量更新结束事件，刷新状态栏
-      offMvuEvent = eventOn(mvu.events.VARIABLE_UPDATE_ENDED, () => {
+      // 监听 MVU 变量更新结束事件 → 事件直接传递更新后的变量对象
+      offMvuEvent = eventOn(mvu.events.VARIABLE_UPDATE_ENDED, (newVariables) => {
+        if (newVariables?.stat_data) {
+          latestStatData = newVariables.stat_data;
+          $el.html(render(latestStatData));
+        } else {
+          latestStatData = getStatDataFromLatestMessage();
+          refresh($el);
+        }
+      });
+
+      // 消息渲染完成后也尝试刷新（兜底）
+      eventOn(tavern_events.MESSAGE_RENDERED, () => {
+        latestStatData = getStatDataFromLatestMessage();
         refresh($el);
       });
     })
@@ -109,8 +142,8 @@ $(() => {
       console.warn('[状态栏] MVU 未加载，使用轮询模式');
     });
 
-  // 兜底定时刷新（确保 MVU 事件遗漏时也能更新）
-  const timer = setInterval(() => refresh($el), 3000);
+  // 兜底定时刷新
+  const timer = setInterval(() => refresh($el), 5000);
 
   // 聊天切换时重新加载
   const offChatChange = reloadOnChatChange();
