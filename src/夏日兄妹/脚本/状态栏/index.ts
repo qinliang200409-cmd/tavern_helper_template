@@ -1,4 +1,4 @@
-import { createScriptIdDiv, teleportStyle } from '@util/script';
+import { createScriptIdDiv, reloadOnChatChange, teleportStyle } from '@util/script';
 
 const CSS = `
 .st-bar{font-family:'Noto Sans SC','Microsoft YaHei',sans-serif;font-size:12px;color:#FFF8EC;background:linear-gradient(160deg,rgba(26,26,46,0.95),rgba(22,33,62,0.92));border:1px solid rgba(212,163,115,0.2);border-radius:8px;padding:10px 14px;max-width:360px;line-height:1.4;margin:4px auto}
@@ -44,38 +44,84 @@ function render(d: any): string {
 </details>`;
 }
 
+/**
+ * 从 chat 级别变量读取 stat_data（MVU 框架的实时数据默认存储在此）
+ */
+function getStatData(): Record<string, any> {
+  return _.get(getVariables({ type: 'chat' }), 'stat_data', {});
+}
+
+function renderBar($el: JQuery) {
+  const stat = getStatData();
+  if (stat && Object.keys(stat).length > 0) {
+    $el.html(render(stat));
+  } else {
+    console.info('[状态栏] stat_data 为空，等待 MVU 数据初始化');
+  }
+}
+
 function refresh($el: JQuery) {
   try {
-    const raw = getVariables({ type: 'message' });
-    const stat = _.get(raw, 'stat_data', {});
-    $el.html(render(stat));
-  } catch (e) { /* ignore */ }
+    renderBar($el);
+  } catch (e) {
+    console.error('[状态栏] 刷新失败', e);
+  }
 }
 
 $(() => {
-  // 注入样式
+  console.info('[状态栏] 加载中…');
+
+  // 注入自定义 CSS 到 iframe 头部，以便 teleportStyle 能复制到酒馆页面
+  $(`<style script_id="${getScriptId()}">${CSS}</style>`).appendTo('head');
+
+  // 注入样式到酒馆页面
   const { destroy: destroyStyle } = teleportStyle();
 
   // 创建容器
   const $el = createScriptIdDiv().appendTo('#chat');
 
-  // 首次渲染
-  refresh($el);
+  // 首次渲染（从 chat 级别变量读取）
+  renderBar($el);
 
-  // 监听MVU变量更新
-  if (typeof Mvu !== 'undefined' && Mvu?.events?.VARIABLE_UPDATE_ENDED) {
-    try {
-      eventOn(Mvu.events.VARIABLE_UPDATE_ENDED, () => refresh($el));
-    } catch (e) { /* fallback to interval */ }
-  }
+  // 等待 MVU 框架初始化，然后监听变量更新
+  let offMvuEvent: (() => void) | undefined;
 
-  // 兜底定时刷新
+  waitGlobalInitialized<typeof Mvu>('Mvu')
+    .then(mvu => {
+      console.info('[状态栏] MVU 已就绪');
+
+      // 用 Mvu API 重新获取一次数据（更可靠）
+      try {
+        const mvuData = mvu.getMvuData({ type: 'chat' });
+        if (mvuData?.stat_data && Object.keys(mvuData.stat_data).length > 0) {
+          $el.html(render(mvuData.stat_data));
+        }
+      } catch (e) {
+        console.warn('[状态栏] Mvu.getMvuData 失败，回退至 getVariables', e);
+      }
+
+      // 监听 MVU 变量更新结束事件，刷新状态栏
+      offMvuEvent = eventOn(mvu.events.VARIABLE_UPDATE_ENDED, () => {
+        refresh($el);
+      });
+    })
+    .catch(() => {
+      console.warn('[状态栏] MVU 未加载，使用轮询模式');
+    });
+
+  // 兜底定时刷新（确保 MVU 事件遗漏时也能更新）
   const timer = setInterval(() => refresh($el), 3000);
+
+  // 聊天切换时重新加载
+  const offChatChange = reloadOnChatChange();
 
   // 清理
   $(window).on('pagehide', () => {
+    console.info('[状态栏] 卸载');
     clearInterval(timer);
     destroyStyle();
     $el.remove();
+    if (offMvuEvent) offMvuEvent();
+    offChatChange();
   });
 });
